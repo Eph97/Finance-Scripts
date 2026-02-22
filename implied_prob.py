@@ -5,14 +5,15 @@ import matplotlib.pyplot as plt
 from tsdb import tsdb_get
 from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import CubicSpline
+import gs
 
 
-date pd.Timestamp('2025-06-23')
+date = pd.Timestamp('2025-06-23')
 strikes = np.arange(40,120)
 tenors = pd.date_range(start=dt.datetime(2025,7,1), end=dt.datetime(2026,12,1), freq='MS').strftime('%y%m').to_list()
 tenors = ['2508', '2509', '2512']
 
-def call_tick(contractDate_num, k):
+def call_tick(stub, contractDate_num, k):
     return stub + '_' + contractDate_num + '_c' + str(int(k))
 
 as_of = dt.datetime(2025,6,23)
@@ -20,7 +21,7 @@ as_of = dt.datetime(2025,6,23)
 def get_butterflies(date, type, type_contract):
 
     as_of = dt.datetime.strptime(date, "%Y-%m-%d")
-    strikes = np.arange(40,12)
+    strikes = np.arange(40,120)
 
     if type_contract == 'Brent':
         stub = 'lco'
@@ -29,7 +30,7 @@ def get_butterflies(date, type, type_contract):
         stub = 'cl'
     rows=[]
     for tenor in tenors:
-        flys_tik = [call_tick(tenor, k) for k in strikes]
+        flys_tik = [call_tick(stub, tenor, k) for k in strikes]
         flys = tsdb_get(flys_tik)
         cols = flys.columns.to_list()
         cols.sort()
@@ -40,68 +41,64 @@ def get_butterflies(date, type, type_contract):
 
         for k in strikes:
             if type_contract == 'WTI':
-                if all(col in flys_as_of.index.to_list() for col in [call_tick(tenor, k-1), call_tick(tenor, k+0), call_tick(tenor, k+1)]):
-                    lw_px = fly_as_of[cll_tick(tenor, k-1)]
-                    c_px = fly_as_of[call_tick(tenor, k+0)]
-                    rw_px = fly_as_of[call_tick(tenor, k+1)]
+                if all(col in flys_as_of.index.to_list() for col in [call_tick(stub, tenor, k-1), call_tick(stub, tenor, k+0), call_tick(stub, tenor, k+1)]):
+                    lw_px = flys_as_of[call_tick(stub, tenor, k-1)]
+                    c_px = flys_as_of[call_tick(stub, tenor, k+0)]
+                    rw_px = flys_as_of[call_tick(stub, tenor, k+1)]
                     px = lw_px - 2*c_px + rw_px
                     rows.append({'k':k, 'p': px, 'tenor':tenor, 'lw': lw_px, 'c':c_px, 'rw':rw_px})
-                elif type_contract == 'Brent':
-                    if all(col in fly_as_of.index.to_list() for col in [call_tick(tenor, k-10), call_tick(tenor, k+0), call_tick(tenor, k+10)]):
-                    lw_px = fly_as_of[cll_tick(tenor, k-1)]
-                    c_px = fly_as_of[call_tick(tenor, k+0)]
-                    rw_px = fly_as_of[call_tick(tenor, k+1)]
+            elif type_contract == 'Brent':
+                if all(col in flys_as_of.index.to_list() for col in [call_tick(stub, tenor, k-10), call_tick(stub, tenor, k+0), call_tick(stub, tenor, k+10)]):
+                    lw_px = flys_as_of[call_tick(stub, tenor, k-10)]
+                    c_px = flys_as_of[call_tick(stub, tenor, k+0)]
+                    rw_px = flys_as_of[call_tick(stub, tenor, k+10)]
                     px = lw_px - 2*c_px + rw_px
                     rows.append({'k':k, 'p': px, 'tenor':tenor, 'lw': lw_px, 'c':c_px, 'rw':rw_px})
-        df = pd.DataFrame(rows)
-        if type_contract == 'Brent':
-            df['k'] = df['k']/10
-        df_dict = {}
-        df_smoothed = pd.DataFrame()
-        for tenor in  tenors:
-            df_dict[tenor] = df[df['tenor'] == tenor].set_index('k')['p']]
-            if tenor == '2508':
-                df_dict[tenor]['Smoothed'] = gaussian_fikter1d(df_dict[tenor]['p'], sigma=1.2)
-            else:
-                df_dict[tenor]['Smoothed'] = gaussian_filter1d(df_dict[tenor]['p'], sigma=1.8)
-            if tenor==tenors[0]:
-                df_smoothed[tenor]=df_dict[tenor]['Smoothed']
-            else:
-                df_smoothed[tenor]=df_smoothed.merge(df_dict[tenor]['Smoothed']], how='outer', left_index=True, right_index=True)
-        df_smoothed.columns=tenors
-        for col in df_smoothed:
-            df_smoothed[col]=np.where(df_smoothed[col]<0, np.nan, df_smoothed[col])
-            if df_smoothed.isna().loc[df_smoothed.index[0],col] == True:
-                df_smoothed.loc[df_smoothed.index[0], col]=0
-            if df_smoothed.isnba().loc[df_smoothed.index[-1], col] ==True:
-                df_smoothed.loc[df_smoothed.index[-1], col] = 0
+    df = pd.DataFrame(rows)
+    if type_contract == 'Brent':
+        df['k'] = df['k']/10
+    df_dict = {}
+    df_smoothed = pd.DataFrame()
+    for tenor in  tenors:
+        df_dict[tenor] = df[df['tenor'] == tenor].set_index('k')['p']
+        if tenor == '2508':
+            df_dict[tenor]['Smoothed'] = gaussian_filter1d(df_dict[tenor]['p'], sigma=1.2)
+        else:
+            df_dict[tenor]['Smoothed'] = gaussian_filter1d(df_dict[tenor]['p'], sigma=1.8)
+        if tenor==tenors[0]:
+            df_smoothed[tenor]=df_dict[tenor]['Smoothed']
+        else:
+            df_smoothed[tenor]=df_smoothed.merge(df_dict[tenor]['Smoothed'], how='outer', left_index=True, right_index=True)
+    df_smoothed.columns=tenors
+    for col in df_smoothed:
+        df_smoothed[col]=np.where(df_smoothed[col]<0, np.nan, df_smoothed[col])
+        if df_smoothed.isna().loc[df_smoothed.index[0],col] == True:
+            df_smoothed.loc[df_smoothed.index[0], col]=0
+        if df_smoothed.isna().loc[df_smoothed.index[-1], col] ==True:
+            df_smoothed.loc[df_smoothed.index[-1], col] = 0
 
-        df_smoothed.index = df_smoothed.index.astype(int)
+    df_smoothed.index = df_smoothed.index.astype(int)
 
-        for_interp = pd.DataFrame(index=range(df_smoothed.index[0], df_smoothed.index[-1]))
-        df_smoothed = df_smoothed.merge(for_interp, how='outer', left_index=True, right_index=True)
+    for_interp = pd.DataFrame(index=range(df_smoothed.index[0], df_smoothed.index[-1]))
+    df_smoothed = df_smoothed.merge(for_interp, how='outer', left_index=True, right_index=True)
 
-        # Interpolate missing values in df_smoothed using cubic spline.
+    # Interpolate missing values in df_smoothed using cubic spline.
+    df_interpolated = df_smoothed.copy()
+    for col in df_interpolated.columns:
+        valid = df_interpolated[col].dropna()
+        if len(valid) >= 2:
+            cs = CubicSpline(valid.index, valid.values)
+            df_interpolated[col] = cs(df_interpolated.index)
 
-        df_interpolate[columns] = cubic_interp(df_smoothed.index)
+    for col in df_interpolated:
+        df_interpolated[col] = np.where(df_interpolated[col]<0,0, df_interpolated[col])
 
-        for col in df_interpolated:
-            df_interpolated[col] = np.where(df_interpolated[col]<0,0, df_interpolated[col])
+    df_interpolated.columns = ['August 2025', 'September 2025', 'December 2025']
 
-            df_interpolated.columns = ['August 2025', 'September 2025', 'December 2025']
-
-            if type=='smoothed':
-                return df_smoothed
-            else:
-                return df_interpolated
-
-
-def as_of_compare(expire):
-    df_compare=recent[[expire]]
-    df_compare.columns = ['As of latest']
-    df_compare['As of June 20th'] = peak_escalation[expire]
-    df_compare['As of June 10th'] = peak_escalation[expire]
-    return df_compare
+    if type=='smoothed':
+        return df_smoothed
+    else:
+        return df_interpolated
 
 
 def as_of_compare(expire):
@@ -161,4 +158,3 @@ panel.add_chart(
 recent = get_butterflies(date='2025-06-23', type='interpolated', type_contract='WTI')
 peak_escalation = get_butterflies(date='2025-06-20', type='interpolated', type_contract='WTI')
 pre_escalation = get_butterflies(date='2025-06-10', type='interpolated', type_contract='WTI')
-
